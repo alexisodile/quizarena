@@ -402,7 +402,22 @@ function handleRoomUpdate(room) {
 
   if(room.phase !== lastPhase) {
     lastPhase = room.phase;
-    if(room.phase === 'generating') {
+
+    if(room.phase === 'lobby') {
+      // Retour au lobby après restart — reset état local
+      clearTimers();
+      countdownRunning = false;
+      lastQ = -1;
+      G.questions = [];
+      G.myAnswers = {};
+      G.myScore = 0;
+      G.currentQ = 0;
+      showScreen('screenLobby');
+      // Réafficher les bons boutons
+      document.getElementById('hostControls').style.display = G.isHost ? 'flex' : 'none';
+      document.getElementById('guestWaiting').style.display = G.isHost ? 'none' : 'block';
+    }
+    else if(room.phase === 'generating') {
       showScreen('screenLoading');
       if(G.isHost) generateAndSendQuestions();
     }
@@ -486,7 +501,22 @@ async function generateAndSendQuestions() {
 }
 
 async function callClaudeForQuestions() {
-  const prompt = `Tu génères exactement 10 questions de culture générale pour un quiz multijoueur en stream. Les questions doivent être VARIÉES, AMUSANTES et couvrir des catégories différentes.
+  // Seed aléatoire pour forcer des questions différentes à chaque partie
+  const seed = Math.random().toString(36).substr(2, 8);
+  const themeBonus = [
+    'avec un focus sur les années 80-90',
+    'avec un focus sur la science et la nature',
+    'avec un focus sur le sport et les records',
+    'avec un focus sur la gastronomie mondiale',
+    'avec un focus sur le cinéma et la musique',
+    'avec un focus sur l\'histoire ancienne',
+    'avec un focus sur la géographie et les pays',
+    'avec un focus sur les personnalités célèbres',
+    'avec un focus sur les technologies et inventions',
+    'avec un focus sur les arts et la culture',
+  ];
+  const theme = themeBonus[Math.floor(Math.random() * themeBonus.length)];
+  const prompt = `[SEED:${seed}] Tu génères exactement 10 questions de culture générale UNIQUES et DIFFÉRENTES des parties précédentes pour un quiz multijoueur en stream, ${theme}. Les questions doivent être VARIÉES, AMUSANTES et couvrir des catégories différentes.
 
 IMPORTANT : exactement 4 questions sur 10 doivent avoir une image. Ces questions visuelles portent SUR l'image (ex: "Dans quel pays se trouve ce monument ?", "Qui est cette personnalité ?", "De quel pays est ce drapeau ?", "Quel est cet animal ?", "Quel est ce tableau célèbre ?").
 
@@ -773,7 +803,14 @@ function showFinal(room) {
   if(G.isHost) { const btn=document.getElementById('restartBtn'); btn.style.display='inline-flex'; }
 }
 
-function restartGame() { if(!G.isHost) return; G.myAnswers={}; G.myScore=0; G.prevScores={}; lastPhase=null; lastQ=-1; send('RESTART_GAME'); }
+function restartGame() {
+  if(!G.isHost) return;
+  // Reset complet état local avant d'envoyer au serveur
+  G.myAnswers = {}; G.myScore = 0; G.prevScores = {};
+  G.questions = []; G.currentQ = 0;
+  lastPhase = null; lastQ = -1; countdownRunning = false;
+  send('RESTART_GAME');
+}
 
 function launchConfetti() {
   const layer=document.getElementById('confettiLayer');
