@@ -124,6 +124,56 @@ body::after {
 .answer-reveal { width:100%; background:var(--surface2); border:1px solid var(--border); padding:14px 18px; font-size:14px; color:var(--muted); }
 .answer-reveal strong { color:var(--success); }
 
+/* ── QUESTION IMAGE ── */
+.q-image-wrap {
+  width:100%;
+  max-height:280px;
+  overflow:hidden;
+  position:relative;
+  background:var(--surface2);
+  border:1px solid var(--border);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.q-image-wrap img {
+  width:100%;
+  max-height:280px;
+  object-fit:cover;
+  display:block;
+  transition:opacity .4s;
+}
+.q-image-wrap.loading::after {
+  content:'';
+  position:absolute;
+  inset:0;
+  background:linear-gradient(90deg,var(--surface2) 25%,var(--surface) 50%,var(--surface2) 75%);
+  background-size:200% 100%;
+  animation:shimmer 1.5s infinite;
+}
+@keyframes shimmer { from{background-position:200% 0} to{background-position:-200% 0} }
+.q-image-error {
+  padding:30px;
+  text-align:center;
+  font-family:'Syne Mono',monospace;
+  font-size:12px;
+  color:var(--muted);
+  letter-spacing:2px;
+}
+.reveal-image-wrap {
+  width:100%;
+  max-height:180px;
+  overflow:hidden;
+  border:1px solid var(--border);
+}
+.reveal-image-wrap img {
+  width:100%;
+  max-height:180px;
+  object-fit:cover;
+  display:block;
+  opacity:0.7;
+}
+
 .leaderboard { width:100%; display:flex; flex-direction:column; gap:8px; }
 .lb-row { display:flex; align-items:center; gap:14px; background:var(--surface); border:1px solid var(--border); padding:14px 18px; animation:lbIn .4s cubic-bezier(.34,1.1,.64,1) both; }
 .lb-row:nth-child(1){animation-delay:.05s;} .lb-row:nth-child(2){animation-delay:.10s;} .lb-row:nth-child(3){animation-delay:.15s;} .lb-row:nth-child(4){animation-delay:.20s;}
@@ -231,7 +281,8 @@ body::after {
     <div class="progress-steps" id="progressSteps"></div>
     <div class="q-header"><div class="q-number" id="qNumber">QUESTION 1/10</div><div class="q-category" id="qCategory">CATÉGORIE</div></div>
     <div class="timer-bar-wrap"><div class="timer-bar-fill" id="timerBar"></div></div>
-    <div style="display:flex;justify-content:flex-end;width:100%;margin-top:-4px;"><div class="timer-num" id="timerNum">20</div></div>
+    <div style="display:flex;justify-content:flex-end;width:100%;margin-top:-4px;"><div class="timer-num" id="timerNum">10</div></div>
+    <div id="qImageWrap" style="display:none;" class="q-image-wrap loading"><img id="qImage" src="" alt=""></div>
     <div class="question-text" id="questionText"></div>
     <div class="answers-grid" id="answersGrid"></div>
     <div class="waiting-msg" id="waitingOthers" style="display:none;">✓ Réponse envoyée — en attente des autres...</div>
@@ -241,6 +292,7 @@ body::after {
   <!-- REVEAL -->
   <div class="screen" id="screenReveal">
     <div class="q-header"><div class="q-number" id="revealQNum">QUESTION 1/10</div><div class="q-category" id="revealCategory"></div></div>
+    <div id="revealImageWrap" style="display:none;" class="reveal-image-wrap"><img id="revealImage" src="" alt=""></div>
     <div class="question-text" id="revealQuestion"></div>
     <div id="revealAnswers" style="width:100%;"></div>
     <div class="answer-reveal" id="answerRevealBox"></div>
@@ -268,7 +320,7 @@ const WS_URL = window.location.protocol === 'https:'
 
 const CLAUDE_API = '/api/claude'; // Proxied via server to hide key
 const Q_COUNT = 10;
-const ANSWER_TIME = 20;
+const ANSWER_TIME = 10;
 const REVEAL_TIME = 6;
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
@@ -434,18 +486,45 @@ async function generateAndSendQuestions() {
 }
 
 async function callClaudeForQuestions() {
-  const categories = ['Histoire','Géographie','Sciences','Art & Culture','Sport','Cinéma & Séries','Musique','Gastronomie','Technologie','Littérature','Politique mondiale','Nature & Animaux'];
-  const prompt = `Génère exactement ${Q_COUNT} questions de culture générale VARIÉES et INTÉRESSANTES pour un quiz multijoueur entre amis. Chaque question doit venir d'une catégorie DIFFÉRENTE parmi : ${categories.join(', ')}.
+  const prompt = `Tu génères exactement 10 questions de culture générale pour un quiz multijoueur en stream. Les questions doivent être VARIÉES, AMUSANTES et couvrir des catégories différentes.
 
-RÈGLES :
-- Questions claires, sans ambiguïté
-- Niveau de difficulté MIXTE (2 faciles, 5 moyennes, 3 difficiles)
-- Questions AMUSANTES à jouer entre amis en stream
+IMPORTANT : exactement 4 questions sur 10 doivent avoir une image. Ces questions visuelles portent SUR l'image (ex: "Dans quel pays se trouve ce monument ?", "Qui est cette personnalité ?", "De quel pays est ce drapeau ?", "Quel est cet animal ?", "Quel est ce tableau célèbre ?").
 
-Réponds UNIQUEMENT avec du JSON valide :
-{"questions":[{"category":"...","question":"...","answers":["A","B","C","D"],"correct":0,"explanation":"..."}]}
+Pour les questions avec image, tu fournis une URL d'image RÉELLE depuis Wikimedia Commons (format : https://upload.wikimedia.org/wikipedia/commons/...) ou une URL directe fiable. L'URL doit pointer vers un fichier image (.jpg .png .svg). Choisis des sujets iconiques dont l'image existe avec certitude sur Wikimedia.
 
-"correct" = index 0-3 de la bonne réponse. Aucun texte avant/après le JSON.`;
+Exemples de sujets avec image fiables :
+- Tour Eiffel → https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/800px-Tour_Eiffel_Wikimedia_Commons.jpg
+- Drapeau du Japon → https://upload.wikimedia.org/wikipedia/en/thumb/9/9e/Flag_of_Japan.svg/800px-Flag_of_Japan.svg.png
+- La Joconde → https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg/800px-Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg
+- Lion → https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/Lion_waiting_in_Namibia.jpg/800px-Lion_waiting_in_Namibia.jpg
+
+Réponds UNIQUEMENT avec du JSON valide, aucun texte avant ou après :
+{
+  "questions": [
+    {
+      "category": "Géographie",
+      "question": "Dans quel pays se trouve ce monument ?",
+      "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/800px-Tour_Eiffel_Wikimedia_Commons.jpg",
+      "answers": ["France", "Italie", "Espagne", "Royaume-Uni"],
+      "correct": 0,
+      "explanation": "La Tour Eiffel est à Paris, en France. Elle a été construite en 1889."
+    },
+    {
+      "category": "Histoire",
+      "question": "En quelle année a débuté la Première Guerre mondiale ?",
+      "image_url": null,
+      "answers": ["1912", "1914", "1916", "1918"],
+      "correct": 1,
+      "explanation": "La Première Guerre mondiale a débuté en 1914."
+    }
+  ]
+}
+
+Règles :
+- "image_url" = URL Wikimedia valide pour les 4 questions visuelles, null pour les 6 autres
+- "correct" = index 0-3 de la bonne réponse
+- Niveau mixte : 2 faciles, 5 moyennes, 3 difficiles
+- Questions avec image : la question porte TOUJOURS sur ce qu'on voit dans l'image`;
 
   try {
     const res = await fetch(CLAUDE_API, {
@@ -505,6 +584,21 @@ function renderQuestion(q, qIdx, room) {
   document.getElementById('questionText').textContent = q.question;
   document.getElementById('waitingOthers').style.display = 'none';
 
+  // ── Image de la question ──────────────────────────────────────────────────
+  const imgWrap = document.getElementById('qImageWrap');
+  const imgEl = document.getElementById('qImage');
+  if(q.image_url) {
+    imgWrap.style.display = 'flex';
+    imgWrap.classList.add('loading');
+    imgEl.style.opacity = '0';
+    imgEl.onload = () => { imgWrap.classList.remove('loading'); imgEl.style.opacity='1'; };
+    imgEl.onerror = () => { imgWrap.innerHTML = '<div class="q-image-error">⚠ IMAGE INDISPONIBLE</div>'; imgWrap.classList.remove('loading'); };
+    imgEl.src = q.image_url;
+  } else {
+    imgWrap.style.display = 'none';
+    imgEl.src = '';
+  }
+
   const grid = document.getElementById('answersGrid');
   grid.innerHTML = '';
   const keys = ['A','B','C','D'];
@@ -554,8 +648,8 @@ function startTimer(seconds, onEnd) {
     G.timeLeft--;
     num.textContent = G.timeLeft;
     bar.style.width = (G.timeLeft/seconds*100)+'%';
-    if(G.timeLeft<=5){bar.style.background='var(--danger)';num.style.color='var(--danger)';}
-    else if(G.timeLeft<=10){bar.style.background='var(--accent3)';num.style.color='var(--accent3)';}
+    if(G.timeLeft<=3){bar.style.background="var(--danger)";num.style.color="var(--danger)";}
+    else if(G.timeLeft<=6){bar.style.background="var(--accent3)";num.style.color="var(--accent3)";}
     if(G.timeLeft<=0){clearInterval(G.timerInterval);onEnd();}
   },1000);
 }
@@ -570,6 +664,17 @@ function showReveal(room) {
   document.getElementById('revealQNum').textContent = `QUESTION ${qIdx+1}/${Q_COUNT}`;
   document.getElementById('revealCategory').textContent = q.category;
   document.getElementById('revealQuestion').textContent = q.question;
+
+  // ── Image révélation ──────────────────────────────────────────────────────
+  const revImgWrap = document.getElementById('revealImageWrap');
+  const revImgEl = document.getElementById('revealImage');
+  if(q.image_url) {
+    revImgWrap.style.display = 'block';
+    revImgEl.src = q.image_url;
+  } else {
+    revImgWrap.style.display = 'none';
+    revImgEl.src = '';
+  }
 
   const myAns = G.myAnswers[qIdx];
   const keys = ['A','B','C','D'];
@@ -587,7 +692,24 @@ function showReveal(room) {
   });
   revDiv.appendChild(grid);
 
-  document.getElementById('answerRevealBox').innerHTML = `💡 <strong>${q.answers[q.correct]}</strong> — ${q.explanation||''}`;
+  // Calcul du feedback points pour ce joueur
+  const me = room.players && room.players[G.playerId];
+  const myLastPts = me ? (me.lastPts||0) : 0;
+  const myRank = me && me.speedRank && me.speedRank[qIdx] ? me.speedRank[qIdx] : 0;
+  const myAnsCorrect = G.myAnswers[qIdx] === q.correct;
+  let ptsFeedback = '';
+  if(myAnsCorrect) {
+    ptsFeedback = `<span style="color:var(--success);font-weight:700;"> +${myLastPts} pts`;
+    if(myRank===1) ptsFeedback += ' 🥇 1er à répondre !';
+    else if(myRank===2) ptsFeedback += ' 🥈 2ème à répondre !';
+    else if(myRank===3) ptsFeedback += ' 🥉 3ème à répondre !';
+    ptsFeedback += '</span>';
+  } else if(G.myAnswers[qIdx] !== undefined && G.myAnswers[qIdx] !== -1) {
+    ptsFeedback = '<span style="color:var(--danger);"> +0 pts ❌</span>';
+  } else {
+    ptsFeedback = '<span style="color:var(--muted);"> pas répondu</span>';
+  }
+  document.getElementById('answerRevealBox').innerHTML = `💡 <strong>${q.answers[q.correct]}</strong> — ${q.explanation||''}<br><span style="font-size:13px;">Toi :${ptsFeedback}</span>`;
   updateMiniScores(room,'revealScores');
 
   let n = REVEAL_TIME;
@@ -601,6 +723,8 @@ function showReveal(room) {
 }
 
 // ── SCORES ────────────────────────────────────────────────────────────────────
+const SPEED_LABELS = ['','🥇 +30','🥈 +15','🥉 +10'];
+
 function updateMiniScores(room, containerId) {
   const container = document.getElementById(containerId);
   if(!container||!room) return;
@@ -609,7 +733,12 @@ function updateMiniScores(room, containerId) {
   players.forEach(p=>{
     const chip=document.createElement('div');
     chip.className='mini-score-chip'+(p.id===G.playerId?' me':'');
-    chip.innerHTML=`<span style="font-size:18px;">${avatarEmoji(p.name)}</span><span style="color:${avatarColor(p.name)};font-weight:700;">${p.name}</span>${p.id===G.playerId?'<span style="font-size:10px;color:var(--muted);font-family:Syne Mono,monospace;">TOI</span>':''}<span class="pts">${p.score||0}</span>`;
+    // Bonus de rapidité sur la question courante
+    const qIdx = room.currentQ !== undefined ? room.currentQ : (room.revealQ !== undefined ? room.revealQ : 0);
+    const rank = p.speedRank && p.speedRank[qIdx] ? p.speedRank[qIdx] : 0;
+    const speedBadge = rank > 0 ? `<span style="font-size:11px;color:var(--accent);font-family:'Syne Mono',monospace;margin-left:2px;">${SPEED_LABELS[rank]||''}</span>` : '';
+    const lastPts = (p.lastPts && p.lastPts > 0 && containerId === 'revealScores') ? `<span style="font-size:10px;color:var(--success);font-family:'Syne Mono',monospace;">+${p.lastPts}</span>` : '';
+    chip.innerHTML=`<span style="font-size:18px;">${avatarEmoji(p.name)}</span><span style="color:${avatarColor(p.name)};font-weight:700;">${p.name}</span>${p.id===G.playerId?'<span style="font-size:10px;color:var(--muted);font-family:Syne Mono,monospace;">TOI</span>':''}${speedBadge}${lastPts}<span class="pts">${p.score||0}</span>`;
     container.appendChild(chip);
   });
 }
