@@ -343,12 +343,47 @@ function clearTimers(){if(G.timerInterval){clearInterval(G.timerInterval);G.time
 
 // ── WEBSOCKET ─────────────────────────────────────────────────────────────────
 function connectWS(onOpen) {
-  ws = new WebSocket(WS_URL);
-  const dot = document.getElementById('wsDot');
+  // Si déjà connecté, envoie directement
+  if(ws && ws.readyState === WebSocket.OPEN) { onOpen(); return; }
+  // Si en cours de connexion, attends
+  if(ws && ws.readyState === WebSocket.CONNECTING) {
+    ws.addEventListener('open', onOpen, { once: true });
+    return;
+  }
 
-  ws.onopen = () => { dot.classList.add('connected'); if(onOpen) onOpen(); };
-  ws.onclose = () => { dot.classList.remove('connected'); document.getElementById('roomBadge').textContent = 'DÉCONNECTÉ'; };
-  ws.onerror = () => showToast('❌ Erreur de connexion au serveur');
+  const dot = document.getElementById('wsDot');
+  dot.classList.remove('connected');
+
+  try {
+    ws = new WebSocket(WS_URL);
+  } catch(e) {
+    showError('homeError', '❌ Impossible de se connecter au serveur. Réessaie dans quelques secondes.');
+    return;
+  }
+
+  // Timeout si le serveur ne répond pas (plan gratuit Render = endormi)
+  const timeout = setTimeout(() => {
+    if(ws.readyState !== WebSocket.OPEN) {
+      ws.close();
+      showError('homeError', '⏳ Le serveur se réveille (plan gratuit Render). Réessaie dans 30 secondes !');
+    }
+  }, 8000);
+
+  ws.onopen = () => {
+    clearTimeout(timeout);
+    dot.classList.add('connected');
+    if(onOpen) onOpen();
+  };
+  ws.onclose = () => {
+    clearTimeout(timeout);
+    dot.classList.remove('connected');
+    document.getElementById('roomBadge').textContent = 'DÉCONNECTÉ';
+  };
+  ws.onerror = (err) => {
+    clearTimeout(timeout);
+    console.error('WS error:', err);
+    showError('homeError', '❌ Erreur de connexion. Vérifie que le serveur Render est bien démarré.');
+  };
 
   ws.onmessage = (e) => {
     const { type, payload } = JSON.parse(e.data);
@@ -501,42 +536,41 @@ async function generateAndSendQuestions() {
 }
 
 async function callClaudeForQuestions() {
-  // Pool d'images fiables Wikimedia — sélection aléatoire à chaque partie
+  // Pool d'images fiables Wikimedia - selection aleatoire a chaque partie
   const IMAGE_POOL = [
-    { q:'Dans quel pays se trouve ce monument ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Colosseo_2020.jpg/800px-Colosseo_2020.jpg', answers:['Grèce','Italie','Espagne','Portugal'], correct:1, explanation:'Le Colisée est à Rome, en Italie. Construit en 80 après J.-C.', category:'Géographie' },
-    { q:'Dans quel pays se trouve ce monument ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/800px-Tour_Eiffel_Wikimedia_Commons.jpg', answers:['Belgique','Espagne','France','Italie'], correct:2, explanation:'La Tour Eiffel est à Paris, en France. Construite en 1889.', category:'Géographie' },
-    { q:'Dans quelle ville se trouve Big Ben ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/9/93/Clock_Tower_-_Palace_of_Westminster%2C_London_-_May_2007.jpg/800px-Clock_Tower_-_Palace_of_Westminster%2C_London_-_May_2007.jpg', answers:['Dublin','Paris','Berlin','Londres'], correct:3, explanation:'Big Ben est le surnom de la grande cloche du Parlement britannique à Londres.', category:'Géographie' },
-    { q:'Dans quel pays se trouve la Statue de la Liberté ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a1/Statue_of_Liberty_7.jpg/800px-Statue_of_Liberty_7.jpg', answers:['France','Canada','Royaume-Uni','États-Unis'], correct:3, explanation:'La Statue de la Liberté est à New York. Elle fut offerte par la France.', category:'Histoire' },
-    { q:'Qui a peint ce tableau ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg/800px-Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg', answers:['Michel-Ange','Raphaël','Botticelli','Leonardo da Vinci'], correct:3, explanation:'La Joconde a été peinte par Leonardo da Vinci entre 1503 et 1519.', category:'Art' },
-    { q:'Qui a peint "La Nuit étoilée" ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/800px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg', answers:['Monet','Picasso','Van Gogh','Renoir'], correct:2, explanation:'La Nuit étoilée a été peinte par Vincent van Gogh en 1889.', category:'Art' },
-    { q:'À quel pays appartient ce drapeau ?', url:'https://upload.wikimedia.org/wikipedia/en/thumb/9/9e/Flag_of_Japan.svg/800px-Flag_of_Japan.svg.png', answers:['Chine','Corée du Sud','Japon','Singapour'], correct:2, explanation:'C'est le drapeau du Japon, le Hinomaru, avec son disque rouge sur fond blanc.', category:'Drapeaux' },
-    { q:'À quel pays appartient ce drapeau ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Flag_of_Brazil.svg/800px-Flag_of_Brazil.svg.png', answers:['Argentine','Portugal','Mexique','Brésil'], correct:3, explanation:'C'est le drapeau du Brésil, avec la sphère céleste et "Ordem e Progresso".', category:'Drapeaux' },
-    { q:'À quel pays appartient ce drapeau ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d9/Flag_of_Canada_%28Pantone%29.svg/800px-Flag_of_Canada_%28Pantone%29.svg.png', answers:['États-Unis','Australie','Suisse','Canada'], correct:3, explanation:'C'est le drapeau du Canada avec sa célèbre feuille d'érable rouge.', category:'Drapeaux' },
-    { q:'Quel est cet animal ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/Lion_waiting_in_Namibia.jpg/800px-Lion_waiting_in_Namibia.jpg', answers:['Tigre','Jaguar','Puma','Lion'], correct:3, explanation:'C'est un lion, le plus grand félin d'Afrique.', category:'Nature' },
-    { q:'Dans quel pays se trouve ce volcan sacré ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Fuji_san_from_Fujiyoshida.jpg/800px-Fuji_san_from_Fujiyoshida.jpg', answers:['Chine','Corée','Vietnam','Japon'], correct:3, explanation:'Le Mont Fuji est le point culminant du Japon avec 3 776 mètres.', category:'Géographie' },
-    { q:'Dans quel pays se trouvent ces pyramides ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/Kheops-Pyramid.jpg/800px-Kheops-Pyramid.jpg', answers:['Maroc','Tunisie','Libye','Égypte'], correct:3, explanation:'Les pyramides de Gizeh sont en Égypte, construites il y a plus de 4500 ans.', category:'Histoire' },
-    { q:'Dans quel pays se trouve le Taj Mahal ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Taj_Mahal_%28Edited%29.jpeg/800px-Taj_Mahal_%28Edited%29.jpeg', answers:['Pakistan','Bangladesh','Sri Lanka','Inde'], correct:3, explanation:'Le Taj Mahal est à Agra, en Inde. Construit au XVIIe siècle.', category:'Histoire' },
-    { q:'Où vit principalement cet animal ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/6/66/Polar_Bear_-_Alaska_%28cropped%29.jpg/800px-Polar_Bear_-_Alaska_%28cropped%29.jpg', answers:['Antarctique','Sibérie','Alaska','Arctique'], correct:3, explanation:'L'ours polaire vit dans l'Arctique, autour du pôle Nord.', category:'Nature' },
-    { q:'Dans quel pays se trouve ce temple ?', url:'https://upload.wikimedia.org/wikipedia/commons/thumb/b/be/Temple_of_the_Emerald_Buddha%2C_Bangkok.jpg/800px-Temple_of_the_Emerald_Buddha%2C_Bangkok.jpg', answers:['Vietnam','Laos','Cambodge','Thaïlande'], correct:3, explanation:'Le Temple du Bouddha d'Émeraude se trouve à Bangkok, en Thaïlande.', category:'Géographie' },
+    { q:"Dans quel pays se trouve ce monument ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Colosseo_2020.jpg/800px-Colosseo_2020.jpg", answers:["Grèce","Italie","Espagne","Portugal"], correct:1, explanation:"Le Colisée est à Rome, en Italie. Construit en 80 après J.-C.", category:"Géographie" },
+    { q:"Dans quel pays se trouve ce monument ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/800px-Tour_Eiffel_Wikimedia_Commons.jpg", answers:["Belgique","Espagne","France","Italie"], correct:2, explanation:"La Tour Eiffel est à Paris, en France. Construite en 1889.", category:"Géographie" },
+    { q:"Dans quelle ville se trouve Big Ben ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/9/93/Clock_Tower_-_Palace_of_Westminster%2C_London_-_May_2007.jpg/800px-Clock_Tower_-_Palace_of_Westminster%2C_London_-_May_2007.jpg", answers:["Dublin","Paris","Berlin","Londres"], correct:3, explanation:"Big Ben est le surnom de la grande cloche du Parlement britannique à Londres.", category:"Géographie" },
+    { q:"Dans quel pays se trouve la Statue de la Liberté ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/a/a1/Statue_of_Liberty_7.jpg/800px-Statue_of_Liberty_7.jpg", answers:["France","Canada","Royaume-Uni","États-Unis"], correct:3, explanation:"La Statue de la Liberté est à New York. Elle fut offerte par la France.", category:"Histoire" },
+    { q:"Qui a peint ce tableau ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg/800px-Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg", answers:["Michel-Ange","Raphaël","Botticelli","Leonardo da Vinci"], correct:3, explanation:"La Joconde a été peinte par Leonardo da Vinci entre 1503 et 1519.", category:"Art" },
+    { q:"Qui a peint la Nuit étoilée ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/800px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg", answers:["Monet","Picasso","Van Gogh","Renoir"], correct:2, explanation:"La Nuit étoilée a été peinte par Vincent van Gogh en 1889.", category:"Art" },
+    { q:"À quel pays appartient ce drapeau ?", url:"https://upload.wikimedia.org/wikipedia/en/thumb/9/9e/Flag_of_Japan.svg/800px-Flag_of_Japan.svg.png", answers:["Chine","Corée du Sud","Japon","Singapour"], correct:2, explanation:"Le drapeau du Japon, le Hinomaru, avec son disque rouge sur fond blanc.", category:"Drapeaux" },
+    { q:"À quel pays appartient ce drapeau ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Flag_of_Brazil.svg/800px-Flag_of_Brazil.svg.png", answers:["Argentine","Portugal","Mexique","Brésil"], correct:3, explanation:"Le drapeau du Brésil avec la sphère céleste et Ordem e Progresso.", category:"Drapeaux" },
+    { q:"À quel pays appartient ce drapeau ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/d/d9/Flag_of_Canada_%28Pantone%29.svg/800px-Flag_of_Canada_%28Pantone%29.svg.png", answers:["États-Unis","Australie","Suisse","Canada"], correct:3, explanation:"Le drapeau du Canada avec sa célèbre feuille d'érable rouge.", category:"Drapeaux" },
+    { q:"Quel est cet animal ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/Lion_waiting_in_Namibia.jpg/800px-Lion_waiting_in_Namibia.jpg", answers:["Tigre","Jaguar","Puma","Lion"], correct:3, explanation:"Un lion, le plus grand félin d'Afrique.", category:"Nature" },
+    { q:"Dans quel pays se trouve ce volcan sacré ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Fuji_san_from_Fujiyoshida.jpg/800px-Fuji_san_from_Fujiyoshida.jpg", answers:["Chine","Corée","Vietnam","Japon"], correct:3, explanation:"Le Mont Fuji est le point culminant du Japon avec 3776 mètres.", category:"Géographie" },
+    { q:"Dans quel pays se trouvent ces pyramides ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/Kheops-Pyramid.jpg/800px-Kheops-Pyramid.jpg", answers:["Maroc","Tunisie","Libye","Égypte"], correct:3, explanation:"Les pyramides de Gizeh sont en Égypte, construites il y a plus de 4500 ans.", category:"Histoire" },
+    { q:"Dans quel pays se trouve le Taj Mahal ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Taj_Mahal_%28Edited%29.jpeg/800px-Taj_Mahal_%28Edited%29.jpeg", answers:["Pakistan","Bangladesh","Sri Lanka","Inde"], correct:3, explanation:"Le Taj Mahal est à Agra, en Inde. Construit au XVIIe siècle.", category:"Histoire" },
+    { q:"Où vit principalement cet animal ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/6/66/Polar_Bear_-_Alaska_%28cropped%29.jpg/800px-Polar_Bear_-_Alaska_%28cropped%29.jpg", answers:["Antarctique","Sibérie","Alaska","Arctique"], correct:3, explanation:"L'ours polaire vit dans l'Arctique, autour du pôle Nord.", category:"Nature" },
+    { q:"Dans quel pays se trouve ce temple bouddhiste ?", url:"https://upload.wikimedia.org/wikipedia/commons/thumb/b/be/Temple_of_the_Emerald_Buddha%2C_Bangkok.jpg/800px-Temple_of_the_Emerald_Buddha%2C_Bangkok.jpg", answers:["Vietnam","Laos","Cambodge","Thaïlande"], correct:3, explanation:"Le Temple du Bouddha d'Émeraude se trouve à Bangkok, en Thaïlande.", category:"Géographie" },
   ];
-
   // Thèmes variés pour les questions textuelles
   const THEMES = [
-    'les années 80 et 90 (musique, cinéma, sport)',
-    'les découvertes scientifiques et inventions',
-    'le sport et les records mondiaux',
-    'la gastronomie et les plats typiques par pays',
-    'les films et acteurs célèbres',
-    'l'histoire du XXe siècle',
-    'les capitales et pays du monde',
-    'les personnalités historiques célèbres',
-    'l'espace et l'astronomie',
-    'la mythologie grecque et romaine',
-    'les jeux vidéo et la culture geek',
-    'les séries TV populaires',
-    'la littérature et les auteurs',
-    'les records et curiosités du monde',
-    'la médecine et le corps humain',
+    "les années 80 et 90 (musique, cinéma, sport)",
+    "les découvertes scientifiques et inventions",
+    "le sport et les records mondiaux",
+    "la gastronomie et les plats typiques par pays",
+    "les films et acteurs célèbres",
+    "l'histoire du XXe siècle",
+    "les capitales et pays du monde",
+    "les personnalités historiques célèbres",
+    "l'espace et l'astronomie",
+    "la mythologie grecque et romaine",
+    "les jeux vidéo et la culture geek",
+    "les séries TV populaires",
+    "la littérature et les auteurs",
+    "les records et curiosités du monde",
+    "la médecine et le corps humain",
   ];
 
   // Sélection aléatoire : 4 images du pool + 1 thème pour les 6 textuelles
@@ -582,26 +616,6 @@ Format JSON strict, aucun texte avant/après :
   }
 }
 
-
-Règles :
-- "image_url" = URL Wikimedia valide pour les 4 questions visuelles, null pour les 6 autres
-- "correct" = index 0-3 de la bonne réponse
-- Niveau mixte : 2 faciles, 5 moyennes, 3 difficiles
-- Questions avec image : la question porte TOUJOURS sur ce qu'on voit dans l'image`;
-
-  try {
-    const res = await fetch(CLAUDE_API, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ prompt })
-    });
-    if(!res.ok) throw new Error('API error');
-    const data = await res.json();
-    return data.questions;
-  } catch(e) {
-    console.error(e);
-    return getFallback();
-  }
-}
 
 function getFallback() {
   return [
