@@ -186,30 +186,14 @@ function handleLeave(ws, roomCode) {
   else broadcastAll(roomCode, { type: 'ROOM_UPDATE', payload: { room: getPublicRoom(room) } });
 }
 
-// ─── PROXY CLAUDE API ─────────────────────────────────────────────────────────
-app.post('/api/claude', async (req, res) => {
-  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-  if (!ANTHROPIC_API_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configurée' });
-  const { prompt } = req.body;
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 3000,
-        temperature: 1,  // Maximise la variété des questions
-        messages: [{ role: 'user', content: prompt }]
-      }),
-    });
-    if (!response.ok) throw new Error('Anthropic error ' + response.status);
-    const data = await response.json();
-    const text = data.content.map(b => b.text || '').join('');
-    res.json(JSON.parse(text.replace(/```json|```/g, '').trim()));
-  } catch (err) {
-    console.error('Claude proxy error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
+// ─── CONFIG ENDPOINT — renvoie la clé API au client ──────────────────────────
+// Le client appelle Claude directement pour éviter tout cache côté serveur
+app.get('/api/config', (req, res) => {
+  const key = process.env.ANTHROPIC_API_KEY || '';
+  // Headers anti-cache stricts
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Pragma', 'no-cache');
+  res.json({ key });
 });
 
 app.get('/health', (_, res) => res.json({ ok: true, rooms: Object.keys(rooms).length }));
