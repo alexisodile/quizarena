@@ -318,7 +318,7 @@ const WS_URL = window.location.protocol === 'https:'
   ? 'wss://' + window.location.host
   : 'ws://' + window.location.host;
 
-const CLAUDE_API = '/api/claude'; // Proxied via server to hide key
+const CLAUDE_API = 'https://api.anthropic.com/v1/messages'; // Direct call - clé dans le serveur
 const Q_COUNT = 10;
 const ANSWER_TIME = 10;
 const REVEAL_TIME = 6;
@@ -599,14 +599,39 @@ Format JSON strict, aucun texte avant/après :
 {"questions":[{"category":"...","question":"...","image_url":null,"answers":["A","B","C","D"],"correct":0,"explanation":"1 phrase max."}]}`;
 
   try {
-    const res = await fetch(CLAUDE_API, {
+    // Récupère la clé API depuis le serveur
+    let apiKey = '';
+    try {
+      const cfgRes = await fetch('/api/config');
+      const cfg = await cfgRes.json();
+      apiKey = cfg.key || '';
+    } catch(e) { console.warn('Config fetch failed'); }
+
+    if(!apiKey) {
+      console.error('Pas de clé API disponible');
+      return getFallback();
+    }
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ prompt, ts }) // ts rend chaque requête unique
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 3000,
+        temperature: 1,
+        messages: [{ role: 'user', content: prompt }]
+      })
     });
     if(!res.ok) throw new Error('API ' + res.status);
     const data = await res.json();
-    const textQs = (data.questions || []).slice(0, 6);
+    const rawText = data.content.map(b => b.text||'').join('');
+    const parsed = JSON.parse(rawText.replace(/```json|```/g,'').trim());
+    const textQs = (parsed.questions || []).slice(0, 6);
 
     // Mélanger les 10 questions (6 texte + 4 image)
     return [...textQs, ...pickedImages].sort(() => Math.random() - 0.5);
